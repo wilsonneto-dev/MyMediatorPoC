@@ -7,7 +7,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddTransient<IMediator, Mediator>();
-builder.Services.AddTransient<IUseCase<CreateAccountInput>, CreateAccount>();
+builder.Services.AddTransient<IUseCase<CreateAccountInput, Guid>, CreateAccount>();
 
 var app = builder.Build();
 app.UseSwagger();
@@ -20,15 +20,15 @@ app.MapGet("/accounts", () =>
     return new int[] { 1, 2, 3 };
 }).WithOpenApi();
 
-app.MapPost("/accounts", ([FromBody] CreateAccountInput input, [FromServices] IMediator mediator) => {
-    mediator.Send(input);
+app.MapPost("/accounts", async ([FromBody] CreateAccountInput input, [FromServices] IMediator mediator) => {
+    await mediator.Send(input);
     return input;
 }).WithOpenApi();
 
 app.Run();
 
-interface IMediator { Task Send<T>(T input); }
-interface IUseCase<TInput> { Task Execute(TInput input); }
+interface IMediator { Task<TO> Send<T, TO>(T input); }
+interface IUseCase<TInput, TOutput> { Task<TOutput> Execute(TInput input); }
 
 class Mediator : IMediator
 {
@@ -41,30 +41,30 @@ class Mediator : IMediator
         _serviceProvider = serviceProvider;
     }
 
-    public async Task Send<T>(T input)
+    public async Task<TO> Send<T, TO>(T input)
     {
-        var handler = _serviceProvider.GetService<IUseCase<T>>();
+        var handler = _serviceProvider.GetService<IUseCase<T, TO>>();
         if(handler == null)
         {
             _logger.LogError("Handler not found for {Type}", typeof(T));
-            return;
+            return default(TO);
         }
 
-        await handler.Execute(input);
+        return await handler.Execute(input);
     }
 }
 
 record CreateAccountInput(string Email);
 
-class CreateAccount : IUseCase<CreateAccountInput>
+class CreateAccount : IUseCase<CreateAccountInput, Guid>
 {
     private readonly ILogger<CreateAccount> _logger;
 
     public CreateAccount(ILogger<CreateAccount> logger) => _logger = logger;
 
-    public Task Execute(CreateAccountInput input)
+    public Task<Guid> Execute(CreateAccountInput input)
     {
         _logger.LogInformation("Creating account {Email}", input.Email);
-        return Task.CompletedTask;
+        return Task.FromResult(Guid.NewGuid());
     }
 }
