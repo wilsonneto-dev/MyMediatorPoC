@@ -7,7 +7,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddTransient<IMediator, Mediator>();
-builder.Services.AddTransient<IUseCase<CreateAccountInput, Guid>, CreateAccount>();
+builder.Services.AddTransient<IUseCase<CreateAccountInput, CreateAccountOutput>, CreateAccount>();
 
 var app = builder.Build();
 app.UseSwagger();
@@ -21,14 +21,15 @@ app.MapGet("/accounts", () =>
 }).WithOpenApi();
 
 app.MapPost("/accounts", async ([FromBody] CreateAccountInput input, [FromServices] IMediator mediator) => {
-    await mediator.Send(input);
+    await mediator.Send<CreateAccountInput, CreateAccountOutput>(input);
     return input;
 }).WithOpenApi();
 
 app.Run();
 
-interface IMediator { Task<TO> Send<T, TO>(T input); }
-interface IUseCase<TInput, TOutput> { Task<TOutput> Execute(TInput input); }
+interface IMediator { Task<TOutput> Send<TInput, TOutput>(TInput input) where TInput : IInput<TOutput>; }
+interface IUseCase<TInput, TOutput> where TInput : IInput<TOutput> { Task<TOutput> Execute(TInput input); }
+interface IInput<TOutput> { }
 
 class Mediator : IMediator
 {
@@ -41,30 +42,33 @@ class Mediator : IMediator
         _serviceProvider = serviceProvider;
     }
 
-    public async Task<TO> Send<T, TO>(T input)
+    public async Task<TOutput> Send<TInput, TOutput>(TInput input) where TInput : IInput<TOutput>
     {
-        var handler = _serviceProvider.GetService<IUseCase<T, TO>>();
+        var handler = _serviceProvider.GetService<IUseCase<TInput, TOutput>>();
         if(handler == null)
         {
-            _logger.LogError("Handler not found for {Type}", typeof(T));
-            return default(TO);
+            _logger.LogError("Handler not found for {Type} and {Out}", typeof(TInput), typeof(TOutput));
+            return default;
         }
 
+        _logger.LogError("Handler found \\o/ for {Type} and {Out}", typeof(TInput), typeof(TOutput));
         return await handler.Execute(input);
     }
 }
 
-record CreateAccountInput(string Email);
+record CreateAccountInput(string Email) : IInput<CreateAccountOutput>;
 
-class CreateAccount : IUseCase<CreateAccountInput, Guid>
+record CreateAccountOutput(Guid AccountId);
+
+class CreateAccount : IUseCase<CreateAccountInput, CreateAccountOutput>
 {
     private readonly ILogger<CreateAccount> _logger;
 
     public CreateAccount(ILogger<CreateAccount> logger) => _logger = logger;
 
-    public Task<Guid> Execute(CreateAccountInput input)
+    public Task<CreateAccountOutput> Execute(CreateAccountInput input)
     {
         _logger.LogInformation("Creating account {Email}", input.Email);
-        return Task.FromResult(Guid.NewGuid());
+        return Task.FromResult(new CreateAccountOutput(Guid.NewGuid()));
     }
 }
